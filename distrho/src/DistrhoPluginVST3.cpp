@@ -4879,6 +4879,32 @@ struct dpf_factory : v3_plugin_factory_cpp {
     }
 };
 
+// --------------------------------------------------------------------------------------------------------------------
+// Windows compatible uids (opt-in)
+//
+// Hosts identify a VST3 class by the 4 numbers the VST3 SDK reads from its 16 bytes, and save those in projects.
+// The SDK reads the first 8 bytes as a COM GUID on Windows and as plain big-endian numbers everywhere else, so the
+// same dpf_tuid memory is one class id on Windows and another one on macOS and Linux, and projects saved on Windows
+// can't find the plugin on other systems.
+// With DPF_VST3_WINDOWS_COMPATIBLE_UID defined, non-Windows builds store their uids in the byte order that reads back
+// as the Windows class ids. That changes the class ids of existing non-Windows builds, so it is opt-in.
+
+#if defined(DPF_VST3_WINDOWS_COMPATIBLE_UID) && !defined(DISTRHO_OS_WINDOWS)
+static void dpf_tuid_set_windows_compatible(dpf_tuid tuid, const uint32_t a, const uint32_t b, const uint32_t c,
+                                            const uint32_t d)
+{
+    // the GUID that Windows reads from { a, b, c, d }, in plain big-endian order:
+    // Data1 is a, Data2 and Data3 are the low and high 16 bits of b, Data4 is c and d as Windows stores them
+    const uint8_t bytes[16] = {
+        (uint8_t)(a >> 24), (uint8_t)(a >> 16), (uint8_t)(a >> 8),  (uint8_t)a,
+        (uint8_t)(b >> 8),  (uint8_t)b,         (uint8_t)(b >> 24), (uint8_t)(b >> 16),
+        (uint8_t)c,         (uint8_t)(c >> 8),  (uint8_t)(c >> 16), (uint8_t)(c >> 24),
+        (uint8_t)d,         (uint8_t)(d >> 8),  (uint8_t)(d >> 16), (uint8_t)(d >> 24),
+    };
+    std::memcpy(tuid, bytes, sizeof(dpf_tuid));
+}
+#endif
+
 END_NAMESPACE_DISTRHO
 
 // --------------------------------------------------------------------------------------------------------------------
@@ -4957,8 +4983,19 @@ bool ENTRYFNNAME(ENTRYFNNAMEARGS)
         d_nextPluginIsDummy = false;
         d_nextCanRequestParameterValueChanges = false;
 
+       #if defined(DPF_VST3_WINDOWS_COMPATIBLE_UID) && !defined(DISTRHO_OS_WINDOWS)
+        // set from their values every time, never converted in place: hosts may enter the module again after calling
+        // its exit function, and these static arrays keep their contents in between
+        const uint32_t uniqueId = static_cast<uint32_t>(sPlugin->getUniqueId());
+        dpf_tuid_set_windows_compatible(dpf_tuid_class, dpf_id_entry, dpf_id_clas, uniqueId, 0);
+        dpf_tuid_set_windows_compatible(dpf_tuid_component, dpf_id_entry, dpf_id_comp, uniqueId, 0);
+        dpf_tuid_set_windows_compatible(dpf_tuid_controller, dpf_id_entry, dpf_id_ctrl, uniqueId, 0);
+        dpf_tuid_set_windows_compatible(dpf_tuid_processor, dpf_id_entry, dpf_id_proc, uniqueId, 0);
+        dpf_tuid_set_windows_compatible(dpf_tuid_view, dpf_id_entry, dpf_id_view, uniqueId, 0);
+       #else
         dpf_tuid_class[2] = dpf_tuid_component[2] = dpf_tuid_controller[2]
             = dpf_tuid_processor[2] = dpf_tuid_view[2] = sPlugin->getUniqueId();
+       #endif
     }
 
     return true;
